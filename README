@@ -1,0 +1,64 @@
+DESIGN APPROACH:
+Note: All the configuration is passed as an argument to the binary
+Server:
+    The server contains one listener thread that listens on a configurable IP and port. The socket is made nonblocking to allow concurrent connections and it increases the performance.
+Once the nonblocking socket is created it adds to a event loop for polling. I am using libevent library for polling purpose. Once the listener thread accepts a client connection it 
+sends the client FD to one of the worker threrads (number of worker threads are again configurable via command line arguments). The listener thread load balances the client FDs among
+the worker thrrads in a round robin fashion.
+    The Worker threads creates a Flow context for each of the client and save the context to a map. The worker threrads also add the client FD to event loop for polling purpose. Here
+one flow context is responsible for one client. All the data received on the client FD is handled by the flow context object. As TCP receoives data in a stream, I have written the code 
+in such a way to preserve the message boundary. I have used protobuf for serialization and deserialization purpose. while sending the serialized buffer by the client, it also prepends
+4 bytes of data that contains length of the actual payload. This 4 bytes header helps in preserving the message boundary.
+    Once the all the bytes of a message is received, the flow context performs the different operations such as GET, SET, and STAT. The dictionary data structure is a singleton class that
+contains a unordered map. I have used sigleton class because multiple thread should be able to access the same data. Similarly the for the STAT framework alsi I have used singleton class
+as multiple threads can increament the same stat. Once the operation is competed the flow context will create a response using the protobuf class and serialized it to a byte buffer. This
+respoinse buffer is then send to the client and close the connection.
+    For the bloom filter implementation I have used the code from https://github.com/ArashPartow/bloom.git
+
+    The main thread also handles two signals SIGINT and SIGTERM for normal shutdown of the process. It will make sure threads are exited normally.
+
+STAT: A flow completion duration is also added that prints flow completion time for each TCP connection
+
+Run command:
+Usage: ./msgclient -t <NUM_WORKER> -i <server IP address> -p <server port> -b <bloom filter flag (0 for disable and > 0 for enable)>
+here the bloom filetr flag  is optional.
+
+example:
+./remotedict -t 4 -i 127.0.0.1 -p 6000 -b 1
+
+Client:
+    The clent binary takes the configuration from command line arguments. We can interact with the server concurrently by passing number threrads more than 1.
+The client binary take a input file in the command line argument and the file contains the different operations. A sample file (input_data.csv) is present inside the client/data directory.
+It reads the input data from the file, parse it and store it in a vector. Once the read and parse is completed the data is then divided into equal parts to number of worker threads. Basically
+the ideas is top distibute the data to thread equally. After this each thread act on its data independently.
+    Each thread connects to server using the configured IP and port and send one operations to the server using the protobuf serialization and waits for the response. Once it reads the response
+successfully, it desrialized the data and stores the result into a internal vector.
+    Once all the threads done with the operations the main threads takes the result from each of the thread and combined together to a single vector. After this the main thread sort the response
+data based on the timestamp(epoch time in microsecs) and write it to a file inside the client/results folder.
+
+The result file format is as below(first field is timestamp in microsecs):
+1645076461290512,STAT,0,0,0
+1645076461290539,SET,k4,v4
+1645076461290959,GET,k1,NOT_FOUND
+1645076461291038,SET,k5,v5
+1645076461291281,SET,k2,v2
+1645076461291406,SET,k6,v6
+1645076461291708,GET,k2,v2
+1645076461291724,SET,k7,v7
+1645076461292075,STAT,2,0,2
+1645076461292090,SET,k3,v3
+1645076461292431,STAT,2,0,2
+
+the result file name format: results_<timestamp in secs>.csv (eg. results_1645076461.csv)
+
+Usage: ./msgclient -t <NUM_WORKER> -i <server IP address> -p <server port> -f <input_file>
+example:
+./msgclient -t 2 -i 127.0.0.1 -p 6000 -f ./data/input_data.csv
+
+compilation:
+ prerequisite: You need to install libevent and boost for the compilation
+ to comile you need to make command on the root directory. It will compile both client and the server codes.
+ the binary for the server will get generated inside the server folder and the binary name is "remotedict"
+
+benchmarking:
+Latency part is benchmarked in the client binary. The average latency is written in the result file in the end of the file (last line)

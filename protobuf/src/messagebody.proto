@@ -1,0 +1,21 @@
+syntax = "proto2";
+
+message Payload {
+  enum RequestType {
+    GET    = 1;
+    SET    = 2;
+    STAT   = 3;
+  }
+
+  required RequestType requesttype     = 1;
+  optional string      key             = 2;
+  optional string      value           = 3;
+  message Stat{
+    optional int32     numgetreq       = 1;
+    optional int32     numsuccgetreq   = 2;
+    optional int32     numfailgetreq   = 3;
+  }
+
+  optional Stat        stats           = 4;
+  optional string      reason          = 5;
+}

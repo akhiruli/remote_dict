@@ -1,0 +1,10 @@
+STAT
+GET, k1
+SET, k2, v2
+GET, k2
+SET, k3, v3
+SET, k4, v4
+SET, k5, v5
+SET, k6, v6
+SET, k7, v7
+STAT
